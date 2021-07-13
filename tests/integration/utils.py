@@ -95,7 +95,7 @@ class Client:
                     f"The Cachito request did not complete within {self._timeout} minutes"
                 )
 
-            time.sleep(5)
+            time.sleep(20)
             response = self.fetch_request(response.id)
 
         return response
