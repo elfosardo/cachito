@@ -5,6 +5,7 @@ import shutil
 import tarfile
 from pathlib import Path
 from typing import Any, Callable, List, Optional
+from time import sleep
 
 import requests
 
@@ -169,6 +170,36 @@ def save_bundle_archive_checksum(request_id: int) -> None:
     bundle_dir.bundle_archive_checksum.write_text(checksum, encoding="utf-8")
 
 
+def _load_packages_with_error_handling(request_id: int):
+    bundle_dir = RequestBundleDir(request_id)
+    packages_data = PackagesData()
+
+    filename = bundle_dir.packages_data
+
+    try:
+        packages_data.load(filename)
+        return packages_data.packages
+    except CachitoError:
+        log.warning(f"Failed to load {filename}")
+        return None
+
+
+def _check_archive_state(request_id: int, expected_package_count: int):
+    packages = None
+    retries = 0
+
+    while packages is None and retries < 10:
+        retries += 1
+        log.info(f"Checking archive for request {request_id}, attempt {retries}")
+        packages = _load_packages_with_error_handling(request_id)
+        sleep(1)
+
+    if packages is not None and len(packages) == expected_package_count:
+        return
+
+    raise CachitoError(f"Packages file was not properly created for request {request_id}")
+
+
 @app.task(priority=10)
 @runs_if_request_in_progress
 def finalize_request(request_id):
@@ -178,4 +209,7 @@ def finalize_request(request_id):
     save_bundle_archive_checksum(request_id)
     data = aggregate_packages_data(request_id, request["pkg_managers"])
     set_packages_and_deps_counts(request_id, len(data.packages), len(data.all_dependencies))
+
+    _check_archive_state(request_id, len(data.packages))
+
     set_request_state(request_id, "complete", "Completed successfully")
